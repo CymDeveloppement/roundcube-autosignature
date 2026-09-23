@@ -1,0 +1,65 @@
+<?php
+
+$config = array();
+
+// --------------- Source ------------------
+// Where the block added to sent messages comes from: an http(s) URL or a
+// file on the server (absolute path, or relative to the plugin folder).
+// It may be a list: sources are tried in order and the first one that
+// returns content is used (e.g. a file per user, then a default file).
+//
+// Placeholders, replaced with the sender's data (URL-encoded in URLs):
+//   {username} Roundcube login (e.g. yann@pcm-ensemblier.com)
+//   {email}    address of the sender identity
+//   {local}    part of {email} before the @
+//   {domain}   part of {email} after the @
+//   {name}     name of the sender identity
+//   {format}   (sources only) format of the message being sent: 'html' or 'text'
+//              (URLs also receive it as the Accept header: text/html or
+//              text/plain), so the source can provide a version written for
+//              each format. Without it, the plugin converts the block.
+//
+// Examples:
+//   'https://intranet.example.com/signature.html?id={username}'
+//   'https://intranet.example.com/signature.php?id={username}&format={format}'
+//   array('signatures/{email}.html', 'signatures/default.html')
+//   array('signatures/{email}.{format}', 'signatures/default.html')
+$config['autosignature_source'] = 'signatures/default.html';
+
+// Content type of the source: 'auto', 'html' or 'text'.
+// 'auto' uses the Content-Type header of URLs and the extension of files
+// (.txt or .text = text, anything else = html).
+$config['autosignature_type'] = 'auto';
+
+// Also replace the placeholders above inside the content itself, so a single
+// template can serve all users (values are HTML-escaped in HTML content)
+$config['autosignature_replace_vars'] = true;
+
+// --------------- Remote source ------------------
+// Timeout of the HTTP request, in seconds
+$config['autosignature_timeout'] = 5;
+
+// Extra HTTP headers sent with the request, e.g. an access token
+// array('Authorization' => 'Bearer xxxxx')
+$config['autosignature_http_headers'] = array();
+
+// How long a fetched block is cached for each user, in seconds (0 = no cache)
+$config['autosignature_cache_ttl'] = 3600;
+
+// --------------- Behaviour ------------------
+// What to do when no source returns content:
+//   'skip'  send the message without the block
+//   'block' refuse to send the message and show an error
+$config['autosignature_on_error'] = 'skip';
+
+// Where the block goes in replies and forwards:
+//   'auto'   before the history (quoted message or forwarded message), except
+//            in replies of users who write below the quote ("start new message
+//            below the quote" setting): at the end, after their answer
+//   'before' always before the history
+//   'end'    always at the very end of the message
+// New messages always get the block at the end.
+$config['autosignature_reply_position'] = 'auto';
+
+// Text inserted between the message and the block in plain text messages
+$config['autosignature_text_separator'] = "\n\n";

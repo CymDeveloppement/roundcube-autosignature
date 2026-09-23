@@ -1,0 +1,31 @@
+/* Entry of the settings menu */
+#settings-menu li.autosignature > a:before {
+    content: "\f5b7";
+}
+
+.autosignature-info {
+    margin: 0 0 1em;
+    color: #6b7c93;
+}
+
+iframe.autosignature-html {
+    display: block;
+    width: 100%;
+    height: 220px;
+    border: 1px solid #d4dbde;
+    border-radius: 4px;
+    background: #fff;
+    resize: vertical;
+}
+
+pre.autosignature-text {
+    margin: 0;
+    padding: 8px;
+    max-height: 300px;
+    overflow: auto;
+    white-space: pre-wrap;
+    border: 1px solid #d4dbde;
+    border-radius: 4px;
+    background: #f8f9fa;
+    font-size: 13px;
+}

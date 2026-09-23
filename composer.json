@@ -1,0 +1,31 @@
+{
+    "name": "cymdeveloppement/roundcube-autosignature",
+    "type": "roundcube-plugin",
+    "description": "Appends a text or HTML block (signature, disclaimer) to every sent message, loaded from a server file or an external URL with per-user parameters",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Yann Challet",
+            "homepage": "https://github.com/CymDeveloppement",
+            "role": "Maintainer"
+        }
+    ],
+    "homepage": "https://github.com/CymDeveloppement/roundcube-autosignature",
+    "require": {
+        "php": ">=8.0",
+        "roundcube/plugin-installer": ">=0.3.0"
+    },
+    "keywords": [
+        "roundcube",
+        "roundcube-plugin",
+        "signature",
+        "disclaimer",
+        "footer",
+        "email",
+        "webmail"
+    ],
+    "support": {
+        "issues": "https://github.com/CymDeveloppement/roundcube-autosignature/issues",
+        "source": "https://github.com/CymDeveloppement/roundcube-autosignature"
+    }
+}
