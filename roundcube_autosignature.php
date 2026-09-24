@@ -50,6 +50,13 @@ class roundcube_autosignature extends rcube_plugin
             return $args;
         }
 
+        // Message encrypted by Mailvelope (PGP/MIME): the body is empty and
+        // anything added to it would be sent unencrypted next to the
+        // encrypted part
+        if (isset($_POST['_pgpmime'])) {
+            return $args;
+        }
+
         $from = rcube_utils::get_input_string('_from', rcube_utils::INPUT_POST, true);
         $html = $args['type'] == 'html';
         $content = $this->render($this->sender_vars($from), $html ? 'html' : 'text');
@@ -67,14 +74,21 @@ class roundcube_autosignature extends rcube_plugin
 
         $body = $args['body'];
         $pos = $this->block_position($body, $html);
+        $before = substr($body, 0, $pos);
+        $after = substr($body, $pos);
+
+        // A message sent before and edited again ("edit as new", or a draft
+        // saved from it) already contains the block: it is replaced
+        if (in_array($this->compose_mode(), array(rcmail_sendmail::MODE_DRAFT, rcmail_sendmail::MODE_EDIT))) {
+            $before = $this->remove_block($before, $content, $html);
+        }
 
         if ($html) {
             $content = '<div id="autosignature">' . $content . '</div>' . "\r\n";
-            $args['body'] = substr($body, 0, $pos) . $content . substr($body, $pos);
+            $args['body'] = $before . $content . $after;
         } else {
             $separator = (string) $this->rc->config->get('autosignature_text_separator', "\n\n");
-            $before = rtrim(substr($body, 0, $pos));
-            $after = substr($body, $pos);
+            $before = rtrim($before);
 
             $args['body'] = ($before === '' ? '' : $before . $separator) . trim($content)
                 . ($after === '' ? '' : "\n\n" . $after);
@@ -150,10 +164,16 @@ class roundcube_autosignature extends rcube_plugin
                 $select->add(format_email_recipient($item['email'], $item['name']), $item['identity_id']);
             }
 
+            $hidden = html::tag('input', array('type' => 'hidden', 'name' => '_task', 'value' => 'settings'))
+                . html::tag('input', array('type' => 'hidden', 'name' => '_action', 'value' => 'plugin.autosignature'));
+
+            // The page is shown in the frame of the settings: stay framed
+            if (rcube_utils::get_input_string('_framed', rcube_utils::INPUT_GET)) {
+                $hidden .= html::tag('input', array('type' => 'hidden', 'name' => '_framed', 'value' => '1'));
+            }
+
             $form = html::tag('form', array('method' => 'get', 'action' => './'),
-                html::tag('input', array('type' => 'hidden', 'name' => '_task', 'value' => 'settings'))
-                . html::tag('input', array('type' => 'hidden', 'name' => '_action', 'value' => 'plugin.autosignature'))
-                . $select->show($identity ? $identity['identity_id'] : null));
+                $hidden . $select->show($identity ? $identity['identity_id'] : null));
 
             $table->add('title', html::label('autosignature-identity', rcube::Q($this->gettext('identity'))));
             $table->add('', $form);
@@ -238,10 +258,9 @@ class roundcube_autosignature extends rcube_plugin
 
         // Only answers and forwards have a history, a new message may contain
         // pasted quotes
-        $compose = $_SESSION['compose_data_' . rcube_utils::get_input_string('_id', rcube_utils::INPUT_GPC)] ?? array();
         $modes = array(rcmail_sendmail::MODE_REPLY, rcmail_sendmail::MODE_FORWARD, rcmail_sendmail::MODE_DRAFT, rcmail_sendmail::MODE_EDIT);
 
-        if ($position == 'end' || !in_array($compose['mode'] ?? '', $modes)) {
+        if ($position == 'end' || !in_array($this->compose_mode(), $modes)) {
             return $end;
         }
 
@@ -291,6 +310,46 @@ class roundcube_autosignature extends rcube_plugin
         }
 
         return $pos;
+    }
+
+    /**
+     * Compose mode of the message being sent (reply, forward, draft...)
+     */
+    private function compose_mode()
+    {
+        $compose = $_SESSION['compose_data_' . rcube_utils::get_input_string('_id', rcube_utils::INPUT_GPC)] ?? array();
+
+        return $compose['mode'] ?? '';
+    }
+
+    /**
+     * Removes a block added when the message was sent before
+     *
+     * @param string $body    Part of the body before the history
+     * @param string $content Block in the format of the message
+     * @param bool   $html    HTML body
+     *
+     * @return string Body without the block
+     */
+    private function remove_block($body, $content, $html)
+    {
+        if ($html) {
+            // Roundcube prefixes the IDs of the edited message (v1autosignature),
+            // the block may contain nested <div>
+            $div = '(<div\b[^>]*>(?:[^<]++|<(?!/?div\b)|(?1))*</div>)';
+            $pattern = '~<div\b[^>]*\bid="(?:v\d+)?autosignature"[^>]*>(?:[^<]++|<(?!/?div\b)|' . $div . ')*</div>\s*~i';
+
+            $result = preg_replace($pattern, '', $body, 1);
+        } elseif (trim($content) !== '') {
+            // The text version, whatever the line endings and trailing spaces
+            $lines = array_map(function ($line) {
+                return preg_quote(rtrim($line), '~');
+            }, explode("\n", str_replace("\r\n", "\n", trim($content))));
+
+            $result = preg_replace('~' . implode('[ \t]*\r?\n', $lines) . '[ \t]*~', '', $body, 1);
+        }
+
+        return $result ?? $body;
     }
 
     /**
@@ -376,7 +435,8 @@ class roundcube_autosignature extends rcube_plugin
     }
 
     /**
-     * Loads the block from a URL, through the user cache
+     * Loads the block from a URL, through the user cache. When the URL cannot
+     * be loaded, an expired copy is used if it is recent enough.
      *
      * @param string $url     URL
      * @param string $format  Format of the message, 'html' or 'text'
@@ -387,14 +447,49 @@ class roundcube_autosignature extends rcube_plugin
     private function load_url($url, $format, $refresh = false)
     {
         $ttl = (int) $this->rc->config->get('autosignature_cache_ttl', 3600);
-        $cache = $ttl > 0 ? $this->rc->get_cache('autosignature', 'db', $ttl) : null;
+        $fallback = max(0, (int) $this->rc->config->get('autosignature_cache_fallback', 2592000));
+        // Copies are kept long enough to serve as a fallback
+        $cache = $ttl > 0 ? $this->rc->get_cache('autosignature', 'db', max($ttl, $fallback)) : null;
         // The answer may depend on the Accept header, not only on the URL
         $key = md5($format . ':' . $url);
 
-        if ($cache && !$refresh && ($block = $cache->get($key))) {
-            return $block;
+        $cached = $cache ? $cache->get($key) : null;
+        if (!is_array($cached) || !isset($cached['time'], $cached['block'])) {
+            $cached = null;
         }
 
+        if ($cached && !$refresh && $cached['time'] + $ttl > time()) {
+            return $cached['block'];
+        }
+
+        $block = $this->fetch_url($url, $format);
+
+        if ($block === null) {
+            if ($cached && $cached['time'] + max($ttl, $fallback) > time()) {
+                rcube::raise_error("autosignature: using the copy of $url cached on " . date('c', $cached['time']), true);
+                return $cached['block'];
+            }
+
+            return null;
+        }
+
+        if ($cache) {
+            $cache->set($key, array('time' => time(), 'block' => $block));
+        }
+
+        return $block;
+    }
+
+    /**
+     * Loads the block from a URL
+     *
+     * @param string $url    URL
+     * @param string $format Format of the message, 'html' or 'text'
+     *
+     * @return array|null Content and type
+     */
+    private function fetch_url($url, $format)
+    {
         try {
             $timeout = (int) $this->rc->config->get('autosignature_timeout', 5);
             $response = $this->rc->get_http_client()->get($url, array(
@@ -416,21 +511,25 @@ class roundcube_autosignature extends rcube_plugin
             return null;
         }
 
-        $content = (string) $response->getBody();
+        // Only HTML or text: an error page or any other document must not
+        // end up in the messages
         $content_type = $response->getHeaderLine('Content-Type');
-        $type = stripos($content_type, 'text/plain') === 0 ? 'text' : 'html';
+        $mimetype = strtolower(trim(explode(';', $content_type)[0]));
+
+        if ($mimetype != 'text/html' && $mimetype != 'text/plain') {
+            rcube::raise_error("autosignature: $url returned an unsupported Content-Type ("
+                . ($content_type === '' ? 'none' : $content_type) . ')', true);
+            return null;
+        }
+
+        $content = (string) $response->getBody();
+        $type = $mimetype == 'text/plain' ? 'text' : 'html';
 
         if (preg_match('/charset=["\']?([\w-]+)/i', $content_type, $m) && strtoupper($m[1]) != RCUBE_CHARSET) {
             $content = rcube_charset::convert($content, $m[1], RCUBE_CHARSET);
         }
 
-        $block = array($content, $type);
-
-        if ($cache) {
-            $cache->set($key, $block);
-        }
-
-        return $block;
+        return array($content, $type);
     }
 
     /**
@@ -440,6 +539,10 @@ class roundcube_autosignature extends rcube_plugin
      */
     private function load_file($path)
     {
+        if ($path === '') {
+            return null;
+        }
+
         if ($path[0] != '/') {
             $path = $this->home . '/' . $path;
         }

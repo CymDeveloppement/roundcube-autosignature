@@ -9,7 +9,7 @@ $config = array();
 // returns content is used (e.g. a file per user, then a default file).
 //
 // Placeholders, replaced with the sender's data (URL-encoded in URLs):
-//   {username} Roundcube login (e.g. yann@pcm-ensemblier.com)
+//   {username} Roundcube login (e.g. john.doe@example.com)
 //   {email}    address of the sender identity
 //   {local}    part of {email} before the @
 //   {domain}   part of {email} after the @
@@ -28,7 +28,8 @@ $config['autosignature_source'] = 'signatures/default.html';
 
 // Content type of the source: 'auto', 'html' or 'text'.
 // 'auto' uses the Content-Type header of URLs and the extension of files
-// (.txt or .text = text, anything else = html).
+// (.txt or .text = text, anything else = html). URLs must answer with
+// text/html or text/plain in any case, other types are rejected.
 $config['autosignature_type'] = 'auto';
 
 // Also replace the placeholders above inside the content itself, so a single
@@ -45,6 +46,12 @@ $config['autosignature_http_headers'] = array();
 
 // How long a fetched block is cached for each user, in seconds (0 = no cache)
 $config['autosignature_cache_ttl'] = 3600;
+
+// When the URL cannot be loaded (timeout, HTTP error, unsupported
+// Content-Type), the last cached copy is used if it is younger than this, in
+// seconds (0 = never use an expired copy). Requires the cache above.
+// Roundcube keeps cached data 30 days at most.
+$config['autosignature_cache_fallback'] = 2592000;
 
 // --------------- Behaviour ------------------
 // What to do when no source returns content:

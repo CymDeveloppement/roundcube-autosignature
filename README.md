@@ -23,7 +23,8 @@ https://intranet.example.com/signature.html?id={username}
   `{username}`, `{email}`, `{local}`, `{domain}`, `{name}`.
 - **Fallback sources**: a list of sources tried in order, e.g. a file per
   user, then a default file.
-- **Cache** of remote blocks per user, with a configurable lifetime.
+- **Cache** of remote blocks per user, with a configurable lifetime, also
+  used as a fallback when the remote source is down.
 - **Before the history** in replies and forwards: the block goes between
   the answer and the quoted (or forwarded) message.
 - **Read-only preview** in the settings: users see the HTML and text versions
@@ -63,6 +64,7 @@ All options are documented in `config.inc.php.dist`.
 | `autosignature_timeout` | `5` | Timeout of the HTTP request, in seconds. |
 | `autosignature_http_headers` | `[]` | Extra HTTP headers, e.g. `['Authorization' => 'Bearer xxx']`. |
 | `autosignature_cache_ttl` | `3600` | Cache lifetime of remote blocks, in seconds (`0` = no cache). |
+| `autosignature_cache_fallback` | `2592000` | Maximum age of a cached copy used when the URL cannot be loaded, in seconds (`0` = never). 30 days at most. |
 | `autosignature_on_error` | `skip` | `skip` sends without the block, `block` refuses to send. |
 | `autosignature_reply_position` | `auto` | Replies and forwards: `auto`, `before` (before the history) or `end`. See below. |
 | `autosignature_text_separator` | `"\n\n"` | Inserted before the block in plain text messages. |
@@ -96,7 +98,7 @@ $config['autosignature_source'] = 'https://intranet.example.com/signature.php?id
 ```
 
 One file per user, with an optional hand-written text version
-(`yann@pcm-ensemblier.com.html`, `yann@pcm-ensemblier.com.text`) and a common
+(`john.doe@example.com.html`, `john.doe@example.com.text`) and a common
 fallback:
 ```php
 $config['autosignature_source'] = [
@@ -131,7 +133,7 @@ Roundcube sends a plain `GET` request to the configured URL, with the
 placeholders replaced and URL-encoded:
 
 ```
-GET /signature.php?id=yann%40pcm-ensemblier.com&format=html HTTP/1.1
+GET /signature.php?id=john.doe%40example.com&format=html HTTP/1.1
 Host: intranet.example.com
 Accept: text/html                  <- text/plain for a plain text message
 Authorization: Bearer xxxxx        <- only if set in autosignature_http_headers
@@ -147,12 +149,13 @@ server.
 | | |
 |---|---|
 | **Status** | `200` only. Any other status (`404`, `500`...) counts as "no signature". Redirects are followed. |
-| **Content-Type** | `text/html` for an HTML block, `text/plain` for a text block. Any other or missing type is treated as HTML. `autosignature_type` forces the type whatever the header says. |
+| **Content-Type** | `text/html` for an HTML block, `text/plain` for a text block. Any other or missing type is rejected, like an error status. `autosignature_type` forces the type of an accepted response (e.g. `text/plain` treated as HTML). |
 | **Charset** | Taken from the `charset=` parameter of the `Content-Type` (e.g. `text/html; charset=ISO-8859-1`) and converted. Without it, UTF-8 is assumed. |
 | **Body** | An HTML fragment, or a full HTML document: only the content of its `<body>` is kept (the whole `<head>` is dropped). An empty body counts as "no signature". |
 | **Time** | Must answer within `autosignature_timeout` seconds (5 by default). |
 
-When the response counts as "no signature", the next source of the list is
+When the response counts as "no signature", the last cached copy is used if
+there is one (see [Cache](#cache)), else the next source of the list is
 tried, then `autosignature_on_error` applies. For a user without signature,
 answering `404` is therefore the way to fall back on a default source.
 
@@ -222,13 +225,20 @@ and format, so a change on the server shows in sent messages after that delay at
 most. The cache of a user is refreshed as soon as they open their "Automatic
 signature" settings page. Error responses are never cached.
 
+When the server cannot be reached, times out, or returns an error or an
+unsupported `Content-Type`, the last copy fetched for the user, URL and format
+is used instead, as long as it is younger than `autosignature_cache_fallback`
+(30 days by default; the failure is logged). Without a usable copy, the next
+source is tried. With `autosignature_cache_ttl` set to `0`, nothing is cached
+and there is no fallback.
+
 ### Example endpoint (PHP)
 
 ```php
 <?php
 // signature.php?id={username}&format={format}
 $users = [
-    'yann@pcm-ensemblier.com' => ['name' => 'Yann Challet', 'title' => 'Developer', 'phone' => '+33 1 23 45 67 89'],
+    'john.doe@example.com' => ['name' => 'John Doe', 'title' => 'Developer', 'phone' => '+33 1 23 45 67 89'],
 ];
 
 $user = $users[$_GET['id'] ?? ''] ?? null;
@@ -267,6 +277,11 @@ Opening the page reloads the block from its source and refreshes the cache.
 
 - New messages get the block at the very end. In HTML messages it is wrapped
   in `<div id="autosignature">`.
+- A sent message edited again ("Edit as new", or a draft saved from it)
+  already contains the block: it is replaced, not added twice. In plain text,
+  the old block is only found if it is identical to the current one.
+- Messages encrypted with Mailvelope (PGP/MIME) are sent without the block:
+  it could only be added unencrypted.
 - The content of the source is trusted: it is inserted as is in the message.
   Only use sources you control.
 - If the remote page returns a full HTML document, only the content of its
